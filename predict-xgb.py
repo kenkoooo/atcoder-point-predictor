@@ -14,7 +14,7 @@ P_ID = "problem_id"
 U_ID = "user_id"
 IS_AC = "is_ac"
 SCORE = "score"
-R_POINT = "rated_point"
+R_POINT = "point"
 
 BLACK_LIST = [
     re.compile(r"^luogu_bot\d+"),
@@ -37,14 +37,13 @@ def add_is_ac_column(submissions):
 def merge_submissions_contests(submissions, contests):
     merged = pd.merge(submissions, contests,
                       "left", left_on="contest_id", right_index=True)
-    merged = merged[[P_ID, U_ID, "point", IS_AC, "contest_id", RATED]]
+    merged = merged[[P_ID, U_ID, R_POINT, IS_AC, RATED]]
     return merged
 
 
 def add_rated_point_column(table):
     rated_point = table[(table[RATED]) & (table[IS_AC])][[
-        "point", P_ID]].groupby(P_ID).max()
-    rated_point.rename(columns={"point": R_POINT}, inplace=True)
+        R_POINT, P_ID]].groupby(P_ID).max()
     table = pd.merge(table, rated_point, "left",
                      left_on=P_ID, right_index=True)
     return table, rated_point
