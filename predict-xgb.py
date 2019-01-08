@@ -2,9 +2,11 @@
 # %%
 import numpy as np
 import pandas as pd
+import re
 import xgboost as xgb
 from sklearn.model_selection import train_test_split
 from tqdm import tqdm
+from sklearn.model_selection import KFold
 
 RATED = "rated"
 AC_COUNT = "ac_count"
@@ -13,6 +15,11 @@ U_ID = "user_id"
 IS_AC = "is_ac"
 SCORE = "score"
 R_POINT = "rated_point"
+
+BLACK_LIST = [
+    re.compile(r"^luogu_bot\d+"),
+    re.compile(r"^vjudge\d+"),
+]
 
 
 def add_rated_column(contests):
@@ -62,6 +69,18 @@ def add_score_column(table):
     return table, scores
 
 
+def filter_user(users):
+    filtered_users = []
+    for user in users:
+        matched = False
+        for pattern in BLACK_LIST:
+            if pattern.match(user):
+                matched = True
+        if not matched:
+            filtered_users.append(user)
+    return filtered_users
+
+
 # %%
 contests = pd.read_json("data/contests.json").set_index("id")
 submissions = pd.read_csv("data/atcoder_submissions.csv")
@@ -76,13 +95,12 @@ table, rated_point = add_rated_point_column(table)
 table = add_ac_count_column(table)
 table, scores = add_score_column(table)
 
+
 # %%
 df = pd.DataFrame(index=problem_ids)
-
-# %%
 heavy_users = table[(table[RATED]) & (table[AC_COUNT] >= 300)][U_ID]
 heavy_users = set(heavy_users)
-
+heavy_users = filter_user(heavy_users)
 
 # %%
 for user_id in tqdm(heavy_users):
@@ -93,33 +111,17 @@ for user_id in tqdm(heavy_users):
 
 # %%
 df = pd.merge(df, rated_point, "left", left_index=True, right_index=True)
-df.sort_index(inplace=True)
+df.sort_index(inplace=True, axis=0)
+df.sort_index(inplace=True, axis=1)
 
 # %%
-# Cross validation
 train_data = df[df[R_POINT].notnull()]
-train, test = train_test_split(train_data)
-
-x_train = train.iloc[:, :-1].values
-x_test = test.iloc[:, :-1].values
-y_train = train.loc[:, R_POINT].values
-y_test = test.loc[:, R_POINT].values
-
-model = xgb.XGBRegressor()
-model.fit(x_train, y_train)
-print(model.score(x_test, y_test))
-
-# %%
-test["predicted_point"] = model.predict(x_test)
-test[[R_POINT, "predicted_point"]]
-
-# %%
-importance = pd.DataFrame(model.feature_importances_,
-                          index=train_data.columns[:-1],
-                          columns=["importance"])
-importance.sort_values("importance", ascending=False, inplace=True)
-importance
-
-
-# %%
-importance[importance["importance"] > 0.0]
+x = train_data.drop(R_POINT, axis=1).values
+y = train_data[R_POINT]
+kf = KFold(n_splits=5, random_state=71, shuffle=True)
+for train_index, test_index in kf.split(train_data):
+    x_train, y_train = x[train_index], y[train_index]
+    x_test, y_test = x[test_index], y[test_index]
+    model = xgb.XGBRegressor(seed=71)
+    model.fit(x_train, y_train)
+    print(model.score(x_test, y_test))
