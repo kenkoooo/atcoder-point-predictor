@@ -16,10 +16,10 @@ IS_AC = "is_ac"
 SCORE = "score"
 R_POINT = "point"
 
-BLACK_LIST = [
-    re.compile(r"^luogu_bot\d+"),
-    re.compile(r"^vjudge\d+"),
-]
+FIRST_AGC_START = 1468670400
+HEAVY_USER_AC_COUNT_THRESHOLD = 200
+
+NORMAL_USER_PATTERN = "^(?!(luogu_bot|vjudge)\d+)"
 
 
 def add_rated_column(contests):
@@ -59,59 +59,42 @@ def add_ac_count_column(table):
     return table
 
 
-def add_score_column(table):
-    table[SCORE] = 0
-    table[SCORE].where(table[IS_AC], 1, inplace=True)
-    table[SCORE].mask(table[IS_AC], -1, inplace=True)
-    scores = table[[U_ID, P_ID, SCORE]].groupby(
-        [U_ID, P_ID]).max().reset_index()
-    return table, scores
+def create_df():
+    contests = pd.read_json("data/contests.json").set_index("id")
+    submissions = pd.read_csv("data/atcoder_submissions.csv")
+    problem_ids = pd.read_json("data/problems.json")["id"].values
 
+    contests = add_rated_column(contests)
+    submissions = add_is_ac_column(submissions)
+    table = merge_submissions_contests(submissions, contests)
+    table, rated_point = add_rated_point_column(table)
+    table = add_ac_count_column(table)
+    table = table[(table[AC_COUNT] >= HEAVY_USER_AC_COUNT_THRESHOLD)
+                  & (table[U_ID].str.contains(NORMAL_USER_PATTERN))]
 
-def filter_user(users):
-    filtered_users = []
-    for user in users:
-        matched = False
-        for pattern in BLACK_LIST:
-            if pattern.match(user):
-                matched = True
-        if not matched:
-            filtered_users.append(user)
-    return filtered_users
+    t = table[[P_ID, U_ID, IS_AC]].drop_duplicates()
+    t[SCORE] = 0
+    t[SCORE].where(t[IS_AC], -1, inplace=True)
+    t[SCORE].mask(t[IS_AC], 1, inplace=True)
+    t[[P_ID, U_ID, SCORE]].groupby([P_ID, U_ID]).max().reset_index()
+    p = pd.get_dummies(t[t[SCORE] > 0][[P_ID, U_ID]],
+                       columns=[U_ID], dtype='int8')
+    n = pd.get_dummies(t[t[SCORE] < 0][[P_ID, U_ID]],
+                       columns=[U_ID], dtype='int8')
+    p = p.groupby(P_ID).max()
+    n = n.groupby(P_ID).max()
+    p.reset_index(inplace=True)
+    n.reset_index(inplace=True)
+    n.replace(1, -1, inplace=True)
+    df = pd.concat([p, n]).groupby(P_ID).max()
 
+    df = pd.merge(df, rated_point, "left", left_index=True, right_index=True)
 
-# %%
-contests = pd.read_json("data/contests.json").set_index("id")
-submissions = pd.read_csv("data/atcoder_submissions.csv")
-problem_ids = pd.read_json("data/problems.json")["id"].values
-
-
-# %%
-contests = add_rated_column(contests)
-submissions = add_is_ac_column(submissions)
-table = merge_submissions_contests(submissions, contests)
-table, rated_point = add_rated_point_column(table)
-table = add_ac_count_column(table)
-table, scores = add_score_column(table)
-
-
-# %%
-df = pd.DataFrame(index=problem_ids)
-heavy_users = table[(table[RATED]) & (table[AC_COUNT] >= 300)][U_ID]
-heavy_users = set(heavy_users)
-heavy_users = filter_user(heavy_users)
-
-# %%
-for user_id in tqdm(heavy_users):
-    user_score = scores[scores[U_ID] == user_id][[P_ID, SCORE]].set_index(
-        P_ID).rename(columns={SCORE: user_id})
-    df = pd.merge(df, user_score, "left", left_index=True, right_index=True)
+    return df
 
 
 # %%
-df = pd.merge(df, rated_point, "left", left_index=True, right_index=True)
-df.sort_index(inplace=True, axis=0)
-df.sort_index(inplace=True, axis=1)
+df = create_df()
 
 # %%
 train_data = df[df[R_POINT].notnull()]
@@ -124,3 +107,10 @@ for train_index, test_index in kf.split(train_data):
     model = xgb.XGBRegressor(seed=71)
     model.fit(x_train, y_train)
     print(model.score(x_test, y_test))
+
+# %%
+importance = pd.DataFrame(model.feature_importances_,
+                          index=df.drop(R_POINT, axis=1).columns,
+                          columns=["importance"])
+importance[importance["importance"] > 0.0].sort_values(
+    by="importance", ascending=False)
