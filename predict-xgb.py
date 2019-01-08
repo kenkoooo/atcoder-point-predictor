@@ -60,7 +60,8 @@ def add_ac_count_column(table):
 
 
 def create_one_hot_table(t):
-    p = pd.get_dummies(t[[P_ID, U_ID]], columns=[U_ID], dtype='int8')
+    p = pd.get_dummies(t[[P_ID, U_ID]], columns=[U_ID],
+                       dtype='int8', prefix="", prefix_sep="")
     p = p.groupby(P_ID).max()
     p.reset_index(inplace=True)
     return p
@@ -70,7 +71,6 @@ def create_df():
     logger.info("loading data...")
     contests = pd.read_json("data/contests.json").set_index("id")
     submissions = pd.read_csv("data/atcoder_submissions.csv")
-    problem_ids = pd.read_json("data/problems.json")["id"].values
 
     logger.info("merging tables...")
     contests = add_rated_column(contests)
@@ -118,5 +118,6 @@ for train_index, test_index in kf.split(train_data):
 importance = pd.DataFrame(model.feature_importances_,
                           index=df.drop(POINT, axis=1).columns,
                           columns=["importance"])
-importance[importance["importance"] > 0.0].sort_values(
+importance = importance[importance["importance"] > 0.0].sort_values(
     by="importance", ascending=False)
+logger.info(importance)
