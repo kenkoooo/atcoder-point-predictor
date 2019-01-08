@@ -29,7 +29,7 @@ def add_is_ac_column(submissions):
 
 def merge_submissions_contests(submissions, contests):
     merged = pd.merge(submissions, contests,
-                      "left", left_on="contest_id", right_on="id")
+                      "left", left_on="contest_id", right_index=True)
     merged = merged[[P_ID, U_ID, "point", IS_AC, "contest_id", RATED]]
     return merged
 
@@ -63,9 +63,9 @@ def add_score_column(table):
 
 
 # %%
-problems = pd.read_json("data/problems.json")
-contests = pd.read_json("data/contests.json")
+contests = pd.read_json("data/contests.json").set_index("id")
 submissions = pd.read_csv("data/atcoder_submissions.csv")
+problem_ids = pd.read_json("data/problems.json")["id"].values
 
 
 # %%
@@ -77,7 +77,7 @@ table = add_ac_count_column(table)
 table, scores = add_score_column(table)
 
 # %%
-df = pd.DataFrame(index=problems["id"].values)
+df = pd.DataFrame(index=problem_ids)
 
 # %%
 heavy_users = table[(table[RATED]) & (table[AC_COUNT] >= 300)][U_ID]
